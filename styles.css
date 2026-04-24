@@ -1,0 +1,178 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #050508;
+  color: #f4f2ff;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#canvas-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+#canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.vignette {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background: radial-gradient(
+    ellipse 90% 80% at 50% 42%,
+    transparent 42%,
+    rgba(5, 5, 12, 0.22) 100%
+  );
+}
+
+.hud {
+  position: fixed;
+  top: env(safe-area-inset-top, 12px);
+  left: 0;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  pointer-events: none;
+}
+
+.hud-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.hud .chip,
+.hud .status {
+  pointer-events: auto;
+}
+
+.chip {
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(10, 10, 18, 0.55);
+  backdrop-filter: blur(10px);
+  color: inherit;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chip:active {
+  transform: scale(0.98);
+}
+
+.status {
+  min-height: 1.25em;
+  font-size: 13px;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  color: rgba(255, 255, 255, 0.88);
+  max-width: 92vw;
+}
+
+.prompt-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: calc(12px + env(safe-area-inset-bottom, 0)) 16px 20px;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.prompt-dock > * {
+  pointer-events: auto;
+}
+
+.prompt-cutout {
+  flex: 1;
+  display: block;
+  border-radius: 999px;
+  padding: 2px;
+  background: linear-gradient(
+    125deg,
+    rgba(255, 255, 255, 0.55),
+    rgba(180, 170, 255, 0.35),
+    rgba(255, 255, 255, 0.25)
+  );
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12) inset,
+    0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.prompt-cutout input {
+  width: 100%;
+  border: none;
+  border-radius: 999px;
+  padding: 14px 18px;
+  font-size: 16px;
+  background: rgba(6, 6, 12, 0.35);
+  backdrop-filter: blur(14px);
+  color: #fff;
+  outline: none;
+}
+
+.prompt-cutout input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.submit {
+  align-self: center;
+  border: none;
+  border-radius: 999px;
+  padding: 0 20px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #0a0814;
+  background: linear-gradient(160deg, #e8e4ff, #b8a8ff);
+  box-shadow: 0 6px 24px rgba(120, 100, 255, 0.35);
+}
+
+.submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

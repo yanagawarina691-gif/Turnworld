@@ -1,0 +1,7 @@
+# https://docs.railway.app/deploy/config-as-code
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

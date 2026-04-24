@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>TurnWorld</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+          "pusher-js": "https://cdn.jsdelivr.net/npm/pusher-js@8.4.0/+esm"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="canvas-wrap" aria-hidden="true"></div>
+
+    <div class="vignette" aria-hidden="true"></div>
+
+    <div class="hud">
+      <div class="hud-row">
+        <button type="button" id="btn-test-pano" class="chip">测试显示(不扣费)</button>
+        <button type="button" id="btn-gyro" class="chip" hidden>开启陀螺仪</button>
+      </div>
+      <div id="status" class="status" role="status"></div>
+    </div>
+
+    <form id="prompt-form" class="prompt-dock" autocomplete="off">
+      <label class="prompt-cutout">
+        <span class="sr-only">描述你想生成的世界</span>
+        <input
+          id="prompt"
+          name="prompt"
+          type="text"
+          enterkeyhint="send"
+          maxlength="2000"
+          placeholder="用一句话生成你的全景世界…"
+        />
+      </label>
+      <button type="submit" id="submit" class="submit">生成</button>
+    </form>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
