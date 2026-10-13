@@ -444,10 +444,10 @@ const server = http.createServer(async (req, res) => {
   serveStatic(req, res);
 });
 
-/* Railway 等容器需监听 0.0.0.0，否则外网进不来 */
-const HOST = process.env.HOST || "0.0.0.0";
+/* 默认仅本机访问；已配置入口保护的容器部署可显式设置 HOST=0.0.0.0。 */
+const HOST = process.env.HOST || "127.0.0.1";
 server.listen(PORT, HOST, () => {
-  console.log(`TurnWorld http://${HOST}:${PORT}  健康检查: GET /health`);
+  console.log(`TurnWorld http://${HOST}:${server.address().port}  健康检查: GET /health`);
   if (!API_KEY) console.warn("警告: 未设置 BLOCKADE_API_KEY，生成接口不可用");
   else if (HAS_DEFAULT_STYLE)
     console.log(
