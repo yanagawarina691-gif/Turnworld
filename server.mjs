@@ -13,6 +13,14 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  HttpError,
+  sendJson,
+  readBody,
+  respondToError,
+} from "./server/http.mjs";
+import { createSkyboxClient } from "./server/upstream.mjs";
+import { fetchSkyboxImage } from "./server/image-proxy.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,8 +51,8 @@ function loadLocalEnv() {
 loadLocalEnv();
 
 const PUBLIC = path.join(__dirname, "public");
-const BLOCKADE = "https://backend.blockadelabs.com/api/v1";
 const API_KEY = process.env.BLOCKADE_API_KEY || "";
+const blockadeFetch = createSkyboxClient({ apiKey: API_KEY });
 /** @see GET /skybox/styles?model_version=3 — 「M3 Cinematic Realism」 */
 const SKYBOX_STYLE_CINEMATIC_REALISM_M3 = 102;
 const styleEnv = (process.env.SKYBOX_STYLE_ID || "").trim();
@@ -72,35 +80,11 @@ const MIME = {
   ".webp": "image/webp",
 };
 
-function sendJson(res, status, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(body),
-  });
-  res.end(body);
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks).toString("utf8");
-      if (!raw) return resolve({});
-      try {
-        resolve(JSON.parse(raw));
-      } catch (e) {
-        reject(e);
-      }
-    });
-    req.on("error", reject);
-  });
-}
-
 /** 含中日韩等则视为需译成英文再发给 Skybox */
 function promptNeedsEnglish(s) {
-  return /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uff66-\uff9f\uac00-\ud7af]/.test(s);
+  return /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uff66-\uff9f\uac00-\ud7af]/.test(
+    s,
+  );
 }
 
 /**
@@ -119,7 +103,10 @@ async function translatePromptToEnglishIfNeeded(text) {
   else if (/[\u3040-\u30ff]/.test(q)) langpair = "ja|en";
   else if (/[\uac00-\ud7af]/.test(q)) langpair = "ko|en";
   const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(q)}&langpair=${encodeURIComponent(langpair)}`;
-  const r = await fetch(url, { headers: { Accept: "application/json" } });
+  const r = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(8000),
+  });
   if (!r.ok) return trimmed;
   let j;
   try {
@@ -129,33 +116,11 @@ async function translatePromptToEnglishIfNeeded(text) {
   }
   const st = j.responseStatus;
   if (st !== 200 && st !== "200") return trimmed;
-  const out = (j.responseData && String(j.responseData.translatedText || "").trim()) || "";
+  const out =
+    (j.responseData && String(j.responseData.translatedText || "").trim()) ||
+    "";
   if (!out || /^MYMEMORY WARNING/i.test(out)) return trimmed;
   return out.length > 2000 ? out.slice(0, 2000) : out;
-}
-
-async function blockadeFetch(method, urlPath, jsonBody = null) {
-  const url = `${BLOCKADE}${urlPath}`;
-  const opts = {
-    method,
-    headers: {
-      "x-api-key": API_KEY,
-      Accept: "application/json",
-    },
-  };
-  if (jsonBody != null) {
-    opts.headers["Content-Type"] = "application/json";
-    opts.body = JSON.stringify(jsonBody);
-  }
-  const r = await fetch(url, opts);
-  const text = await r.text();
-  let data;
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { _parseError: true, raw: text };
-  }
-  return { status: r.status, data };
 }
 
 /** Blockade 常在 HTTP 200 正文里返回 success:false，需单独识别 */
@@ -163,78 +128,28 @@ function blockadeApiFailure(data, fallbackCode = 403) {
   if (!data || typeof data !== "object" || data._parseError) return null;
   if (data.success !== false) return null;
   const code =
-    typeof data.error_code === "number" && data.error_code >= 400 && data.error_code < 600
+    typeof data.error_code === "number" &&
+    data.error_code >= 400 &&
+    data.error_code < 600
       ? data.error_code
       : fallbackCode;
   const msg =
-    data.response || data.error_message || data.message || "Skybox API 拒绝请求";
+    data.response ||
+    data.error_message ||
+    data.message ||
+    "Skybox API 拒绝请求";
   return { code, body: { error: msg } };
 }
 
-/** 仅允许 Skybox 产出图域名，防止 open proxy */
-function isAllowedSkyboxImageUrl(u) {
-  if (u.protocol !== "https:") return false;
-  const h = u.hostname.toLowerCase();
-  const p = u.pathname;
-  const looksLikeAsset =
-    p.includes("/imagine/") ||
-    p.includes("/thumbs/") ||
-    (p.includes("/images/") && /\.(jpe?g|png|webp)(\?|$)/i.test(p));
-  if (!looksLikeAsset) return false;
-  if (h === "images.blockadelabs.com" || h.endsWith(".images.blockadelabs.com")) return true;
-  if (h === "blockade-platform-production.s3.amazonaws.com") return true;
-  if (h.endsWith(".s3.amazonaws.com") && (h.includes("blockade") || p.includes("/imagine/")))
-    return true;
-  if (h.endsWith(".amazonaws.com") && h.includes("blockade")) return true;
-  if (h.endsWith(".cloudfront.net") && (h.includes("blockade") || h.includes("blockadelabs")))
-    return true;
-  if (h.endsWith("blockadelabs.com") && (h.startsWith("images.") || h.startsWith("cdn.")))
-    return true;
-  return false;
-}
-
-/** GET/POST 共用：从 Blockade 拉取二进制并原样返回 */
 async function proxySkyboxImageByUrl(res, raw) {
-  let target;
-  try {
-    target = new URL(String(raw).trim());
-  } catch {
-    sendJson(res, 400, { error: "无效 url" });
-    return;
-  }
-  if (!isAllowedSkyboxImageUrl(target)) {
-    sendJson(res, 403, {
-      error: `不允许的图片来源: ${target.hostname}（可把完整 file_url 发给开发者加白名单）`,
-    });
-    return;
-  }
-  try {
-    const r = await fetch(target.toString(), {
-      headers: { Accept: "image/*,*/*" },
-    });
-    if (!r.ok) {
-      sendJson(res, 502, {
-        error: `图源返回 HTTP ${r.status}（链接可能过期，请重新生成或换 thumb_url）`,
-      });
-      return;
-    }
-    const ct = r.headers.get("content-type") || "image/jpeg";
-    const MAX_BYTES = 140 * 1024 * 1024;
-    const ab = await r.arrayBuffer();
-    if (ab.byteLength > MAX_BYTES) {
-      sendJson(res, 502, { error: "图片过大，请改用 thumb_url 或更低分辨率导出" });
-      return;
-    }
-    const buf = Buffer.from(ab);
-    res.writeHead(200, {
-      "Content-Type": ct,
-      "Content-Length": buf.length,
-      "Cache-Control": "private, max-age=300",
-    });
-    res.end(buf);
-  } catch {
-    sendJson(res, 502, { error: "图片代理失败" });
-  }
+  const { buffer, contentType } = await fetchSkyboxImage(raw);
+  res.writeHead(200, {
+    "Content-Type": contentType,
+    "Content-Length": buffer.length,
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "private, max-age=300",
+  });
+  res.end(buffer);
 }
 
 /** 与静态资源区分，避免 /api/.../ 落入 public 目录返回 404 */
@@ -256,12 +171,14 @@ function serveStatic(req, res) {
     return;
   }
   if (req.method !== "GET" && req.method !== "HEAD") {
-    sendJson(res, 405, { error: `静态文件不支持 ${req.method}，图片请 POST /pimg` });
+    sendJson(res, 405, {
+      error: `静态文件不支持 ${req.method}，图片请 POST /pimg`,
+    });
     return;
   }
   if (urlPath === "/") urlPath = "/index.html";
   const file = path.join(PUBLIC, path.normalize(urlPath));
-  if (!file.startsWith(PUBLIC)) {
+  if (!file.startsWith(PUBLIC + path.sep)) {
     res.writeHead(403);
     res.end();
     return;
@@ -282,7 +199,7 @@ function serveStatic(req, res) {
   });
 }
 
-const server = http.createServer(async (req, res) => {
+export async function handleRequest(req, res) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
@@ -306,13 +223,20 @@ const server = http.createServer(async (req, res) => {
    */
   if (u === "/pimg" || u === "/api/skybox/image-proxy") {
     if (req.method === "GET") {
-      const q = req.url.includes("?") ? req.url.slice(req.url.indexOf("?") + 1) : "";
+      const q = req.url.includes("?")
+        ? req.url.slice(req.url.indexOf("?") + 1)
+        : "";
       const raw = new URLSearchParams(q).get("url");
       if (!raw) {
         if (u === "/pimg") {
-          sendJson(res, 200, { ok: true, pimg: "POST application/json {\"url\":\"https://...\"}" });
+          sendJson(res, 200, {
+            ok: true,
+            pimg: 'POST application/json {"url":"https://..."}',
+          });
         } else {
-          sendJson(res, 400, { error: "缺少 url（长链接请 POST /pimg + JSON）" });
+          sendJson(res, 400, {
+            error: "缺少 url（长链接请 POST /pimg + JSON）",
+          });
         }
         return;
       }
@@ -322,14 +246,16 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST") {
       try {
         const body = await readBody(req);
-        const raw = (body.url || "").trim();
+        if (typeof body.url !== "string")
+          throw new HttpError(400, "url 必须为字符串");
+        const raw = body.url.trim();
         if (!raw) {
           sendJson(res, 400, { error: "缺少 url" });
           return;
         }
         await proxySkyboxImageByUrl(res, raw);
-      } catch {
-        sendJson(res, 400, { error: "请求体无效 JSON" });
+      } catch (error) {
+        respondToError(res, error);
       }
       return;
     }
@@ -344,7 +270,11 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       const body = await readBody(req);
-      const promptRaw = (body.prompt || "").trim();
+      if (typeof body.prompt !== "string")
+        throw new HttpError(400, "prompt 必须为字符串");
+      const promptRaw = body.prompt.trim();
+      if (promptRaw.length > 2000)
+        throw new HttpError(400, "prompt 不能超过 2000 字符");
       if (!promptRaw) {
         sendJson(res, 400, { error: "请提供 prompt" });
         return;
@@ -358,18 +288,26 @@ const server = http.createServer(async (req, res) => {
         }
       }
       let skybox_style_id;
-      if (typeof body.skybox_style_id === "number" && Number.isFinite(body.skybox_style_id)) {
+      if (
+        typeof body.skybox_style_id === "number" &&
+        Number.isFinite(body.skybox_style_id)
+      ) {
         skybox_style_id = body.skybox_style_id;
       } else if (HAS_DEFAULT_STYLE) {
         skybox_style_id = DEFAULT_STYLE;
       }
       const payload = { prompt: promptSkybox };
       if (skybox_style_id != null) payload.skybox_style_id = skybox_style_id;
-      if (body.negative_text) payload.negative_text = String(body.negative_text).slice(0, 600);
+      if (body.negative_text)
+        payload.negative_text = String(body.negative_text).slice(0, 600);
       if (body.enhance_prompt === true) payload.enhance_prompt = true;
-      if (typeof body.seed === "number" && body.seed >= 0) payload.seed = body.seed;
+      if (typeof body.seed === "number" && body.seed >= 0)
+        payload.seed = body.seed;
       const wh = process.env.BLOCKADE_WEBHOOK_URL;
-      if (typeof body.webhook_url === "string" && body.webhook_url.startsWith("https://"))
+      if (
+        typeof body.webhook_url === "string" &&
+        body.webhook_url.startsWith("https://")
+      )
         payload.webhook_url = body.webhook_url;
       else if (wh && wh.startsWith("https://")) payload.webhook_url = wh;
 
@@ -380,7 +318,11 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (status >= 400) {
-        sendJson(res, status, typeof data === "object" ? data : { error: String(data) });
+        sendJson(
+          res,
+          status,
+          typeof data === "object" ? data : { error: String(data) },
+        );
         return;
       }
       if (data.id == null || data.id === "") {
@@ -398,8 +340,8 @@ const server = http.createServer(async (req, res) => {
         out.prompt_sent = promptSkybox;
       }
       sendJson(res, 200, out);
-    } catch (e) {
-      sendJson(res, 400, { error: "请求体无效 JSON" });
+    } catch (error) {
+      respondToError(res, error);
     }
     return;
   }
@@ -415,7 +357,10 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 400, { error: "无效 id" });
       return;
     }
-    const { status, data } = await blockadeFetch("GET", `/imagine/requests/${id}`);
+    const { status, data } = await blockadeFetch(
+      "GET",
+      `/imagine/requests/${id}`,
+    );
     const bf = blockadeApiFailure(data);
     if (bf) {
       sendJson(res, bf.code, bf.body);
@@ -442,16 +387,26 @@ const server = http.createServer(async (req, res) => {
   }
 
   serveStatic(req, res);
+}
+
+export const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((error) => respondToError(res, error));
 });
 
 /* 默认仅本机访问；已配置入口保护的容器部署可显式设置 HOST=0.0.0.0。 */
 const HOST = process.env.HOST || "127.0.0.1";
-server.listen(PORT, HOST, () => {
-  console.log(`TurnWorld http://${HOST}:${server.address().port}  健康检查: GET /health`);
-  if (!API_KEY) console.warn("警告: 未设置 BLOCKADE_API_KEY，生成接口不可用");
-  else if (HAS_DEFAULT_STYLE)
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  server.listen(PORT, HOST, () => {
     console.log(
-      `Skybox 默认风格 id=${DEFAULT_STYLE}（M3 Cinematic Realism=102；SKYBOX_STYLE_ID=none 可只发 prompt）`
+      `TurnWorld http://${HOST}:${server.address().port}  健康检查: GET /health`,
     );
-  else console.log("Skybox 未带 skybox_style_id（SKYBOX_STYLE_ID=none）");
-});
+    if (!API_KEY) console.warn("警告: 未设置 BLOCKADE_API_KEY，生成接口不可用");
+    else if (HAS_DEFAULT_STYLE)
+      console.log(
+        `Skybox 默认风格 id=${DEFAULT_STYLE}（M3 Cinematic Realism=102；SKYBOX_STYLE_ID=none 可只发 prompt）`,
+      );
+    else console.log("Skybox 未带 skybox_style_id（SKYBOX_STYLE_ID=none）");
+  });

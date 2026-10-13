@@ -99,22 +99,9 @@ function panoUrlForLoader(remoteUrl) {
   try {
     const u = new URL(remoteUrl);
     if (u.protocol !== "https:") return remoteUrl;
-    const h = u.hostname.toLowerCase();
-    const p = u.pathname;
-    const assetPath =
-      p.includes("/imagine/") ||
-      p.includes("/thumbs/") ||
-      (p.includes("/images/") && /\.(jpe?g|png|webp)(\?|$)/i.test(p));
-    if (!assetPath) return remoteUrl;
-    const needProxy =
-      h === "images.blockadelabs.com" ||
-      h.endsWith(".images.blockadelabs.com") ||
-      h === "blockade-platform-production.s3.amazonaws.com" ||
-      (h.endsWith(".s3.amazonaws.com") && (h.includes("blockade") || p.includes("/imagine/"))) ||
-      (h.endsWith(".amazonaws.com") && h.includes("blockade")) ||
-      (h.endsWith(".cloudfront.net") &&
-        (h.includes("blockade") || h.includes("blockadelabs"))) ||
-      (h.endsWith("blockadelabs.com") && (h.startsWith("images.") || h.startsWith("cdn.")));
+    const needProxy = u.hostname === "images.blockadelabs.com" ||
+      u.hostname.endsWith(".images.blockadelabs.com") ||
+      u.hostname === "blockade-platform-production.s3.amazonaws.com";
     if (!needProxy) return remoteUrl;
     return `${SKYBOX_PROXY_PREFIX}${remoteUrl}`;
   } catch {
