@@ -302,11 +302,20 @@ function onDeviceOrientation(e) {
 }
 
 async function enableGyro() {
+  /* 手机用 http://局域网IP 打开时 isSecureContext 为 false，Safari/Chrome 通常不允许设备方向 API */
+  if (!window.isSecureContext) {
+    setStatus(
+      "陀螺仪需 HTTPS：用 IP 的 HTTP 无法授权。请用手指滑动；或用 ngrok / cloudflared 把本机 8787 暴露为 HTTPS 再试。"
+    );
+    return;
+  }
   if (typeof DeviceOrientationEvent !== "undefined" && DeviceOrientationEvent.requestPermission) {
     try {
       const p = await DeviceOrientationEvent.requestPermission();
       if (p !== "granted") {
-        setStatus("未获得陀螺仪权限");
+        setStatus(
+          "未获得陀螺仪权限（可能点了不允许）。可到系统设置里为该浏览器开启「动作与方向」/ 站点权限后重试。"
+        );
         return;
       }
     } catch {
@@ -324,6 +333,9 @@ async function enableGyro() {
 
 if (window.DeviceOrientationEvent) {
   gyroBtn.hidden = false;
+  if (!window.isSecureContext) {
+    gyroBtn.title = "当前为 HTTP，陀螺仪需 HTTPS；仍可点击看说明";
+  }
 }
 gyroBtn.addEventListener("click", () => enableGyro());
 
