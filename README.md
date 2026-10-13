@@ -47,3 +47,14 @@ server.mjs       静态服务与 Skybox API 代理
 .env.example     本地配置示例
 instructions.md  最初的原型需求
 ```
+
+## 请求处理结构
+
+- `server.mjs`：路由与静态资源入口。
+- `server/http.mjs`：有大小限制的 JSON 读取和统一错误响应。
+- `server/upstream.mjs`：Skybox 请求、30 秒超时及上游错误分类。
+- `server/image-proxy.mjs`：图片来源、重定向、类型与流式大小校验。
+
+图片代理接受 `images.blockadelabs.com` 及其子域、`blockade-platform-production.s3.amazonaws.com`，仅允许 HTTPS 的 JPEG、PNG、WebP。若供应商使用新的 CDN，确认实际域名后再更新白名单；不要放开整个云存储域名。每次重定向都重新校验来源，超过 140 MiB 的响应会中止读取。请求 JSON 上限为 64 KiB，prompt 上限为 2,000 字符。
+
+错误响应区分输入错误（400/413）、上游不可用或返回无效内容（502）、上游超时（504）。`npm test` 使用本地 HTTP 服务和模拟上游覆盖这些分支，不调用收费生成接口。
